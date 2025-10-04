@@ -66,6 +66,9 @@ fan_timestamp = time.time()
 # the main loop
 try: 
     while not stop:
+        sensor.trigger()
+        # sleep for a few seconds
+        time.sleep(sleep_time)
         # check if we need a new log file
         now = datetime.now()
         date_str = now.strftime("%Y-%m-%d")
@@ -117,8 +120,7 @@ try:
         log_file.write(json.dumps(entry) + "\n")
         print(entry)
 
-        # sleep for a few seconds
-        time.sleep(sleep_time)
+        
 finally:
     log_file.close()
     pi.write(humidifierpin, off)
