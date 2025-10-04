@@ -115,7 +115,7 @@ try:
                 "humidifier_status": pi.read(humidifierpin)
                 }
         log_file.write(json.dumps(entry) + "\n")
-
+        print(entry)
 
         # sleep for a few seconds
         time.sleep(sleep_time)
