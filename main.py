@@ -121,6 +121,8 @@ try:
         time.sleep(sleep_time)
 finally:
     log_file.close()
+    pi.write(humidifierpin, off)
+    pi.write(fanpin, off)
     pi.stop()
     print("Stopped cleanly.")
         
