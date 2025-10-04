@@ -4,15 +4,15 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, Response
 
-# ====== Config ======
+# ========= Configuration =========
 BASE_DIR = Path(__file__).resolve().parent
-LOG_DIR  = BASE_DIR / "logs"                 # absolute path, reliable under systemd
+LOG_DIR  = BASE_DIR / "logs"                 # absolute path (reliable under systemd)
 HOST, PORT = "0.0.0.0", 8000
-APP_TITLE  = "Oyster Mushroom Farm Status"   # your title
+APP_TITLE  = "Oyster Mushroom Farm Status"
 
 app = Flask(__name__)
 
-# ====== Helpers ======
+# ========= Helpers =========
 def iter_log_files(days: int):
     """Yield existing log-YYYY-MM-DD.jsonl files (oldest→newest) for last N days."""
     today = datetime.now().date()
@@ -46,8 +46,8 @@ def _coerce_int01(x):
 
 def load_data(days: int, sample: int):
     """
-    Return list of {t, temperature, humidity, fan, humidifier}.
-    - t is ISO string
+    Return list of {t_iso, temperature, humidity, fan, humidifier}.
+    - t_iso is ISO string (local time, no TZ)
     - values are floats (temp/hum) or 0/1 (fan/humidifier)
     - keeps every Nth row (sample)
     """
@@ -65,6 +65,7 @@ def load_data(days: int, sample: int):
                     idx += 1
                     continue
                 idx += 1
+
                 try:
                     obj = json.loads(s)
                 except json.JSONDecodeError:
@@ -74,14 +75,14 @@ def load_data(days: int, sample: int):
                 ts = obj.get("timestamp")
                 t_iso = None
                 if ts:
-                    # Try "YYYY-mm-dd HH:MM:SS" first, else pass through
                     try:
+                        # "YYYY-mm-dd HH:MM:SS" -> ISO
                         t_iso = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").isoformat()
                     except ValueError:
                         t_iso = str(ts)
 
                 rows.append({
-                    "t": t_iso or None,
+                    "t_iso": t_iso or None,
                     "temperature": _coerce_float(obj.get("temperature_C")),
                     "humidity":    _coerce_float(obj.get("humidity_%")),
                     "fan":         _coerce_int01(obj.get("fan_status")),
@@ -89,9 +90,10 @@ def load_data(days: int, sample: int):
                 })
     return rows
 
-# ====== Routes ======
+# ========= Routes =========
 @app.route("/")
 def index():
+    # We use a numeric x-axis (epoch ms) so no date adapter is needed.
     return Response(f"""<!doctype html>
 <html lang="en">
 <head>
@@ -169,20 +171,45 @@ def index():
   </div>
   <footer>Logs path: {LOG_DIR}</footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/date-fns@2.30.0/dist/date-fns.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.umd.min.js"></script>
-
   <script>
+    function tsToMs(tiso) {{
+      // Convert ISO string to epoch ms; returns NaN if invalid.
+      return Date.parse(tiso);
+    }}
+
     const commonOpts = {{
       parsing: false, normalized: true, animation: false, responsive: true,
       scales: {{
-        x: {{ type: 'time', time: {{ tooltipFormat: 'yyyy-MM-dd HH:mm:ss' }}, ticks: {{ maxRotation: 0, autoSkip: true }} }},
+        x: {{
+          type: 'linear',
+          ticks: {{
+            callback: (v) => {{
+              const d = new Date(v);
+              if (isNaN(d)) return '';
+              const Y = d.getFullYear();
+              const M = String(d.getMonth()+1).padStart(2,'0');
+              const D = String(d.getDate()).padStart(2,'0');
+              const h = String(d.getHours()).padStart(2,'0');
+              const m = String(d.getMinutes()).padStart(2,'0');
+              return `${{M}}-${{D}} ${{h}}:${{m}}`;
+            }},
+            maxRotation: 0, autoSkip: true
+          }}
+        }},
         y: {{ beginAtZero: false }}
       }},
       plugins: {{
         legend: {{ display: true, position: 'top' }},
-        tooltip: {{ mode: 'nearest', intersect: false }}
+        tooltip: {{
+          callbacks: {{
+            title(items) {{
+              if (!items.length) return '';
+              const d = new Date(items[0].parsed.x);
+              return d.toLocaleString();
+            }}
+          }}
+        }}
       }}
     }};
 
@@ -225,14 +252,18 @@ def index():
         const payload = await res.json();
         const pts = payload.data || [];
 
-        const tSeries = pts.filter(p => p.t && p.temperature !== null && p.temperature !== undefined)
-                           .map(p => ({{ x: p.t, y: p.temperature }}));
-        const hSeries = pts.filter(p => p.t && p.humidity !== null && p.humidity !== undefined)
-                           .map(p => ({{ x: p.t, y: p.humidity }}));
-        const fanSeries = pts.filter(p => p.t && p.fan !== null && p.fan !== undefined)
-                             .map(p => ({{ x: p.t, y: +p.fan }}));
-        const humiSeries = pts.filter(p => p.t && p.humidifier !== null && p.humidifier !== undefined)
-                              .map(p => ({{ x: p.t, y: +p.humidifier }}));
+        const tSeries = pts.filter(p => p.t_iso && p.temperature != null)
+                           .map(p => ({{ x: tsToMs(p.t_iso), y: +p.temperature }}))
+                           .filter(p => !Number.isNaN(p.x));
+        const hSeries = pts.filter(p => p.t_iso && p.humidity != null)
+                           .map(p => ({{ x: tsToMs(p.t_iso), y: +p.humidity }}))
+                           .filter(p => !Number.isNaN(p.x));
+        const fanSeries = pts.filter(p => p.t_iso && p.fan != null)
+                             .map(p => ({{ x: tsToMs(p.t_iso), y: +p.fan }}))
+                             .filter(p => !Number.isNaN(p.x));
+        const humiSeries = pts.filter(p => p.t_iso && p.humidifier != null)
+                              .map(p => ({{ x: tsToMs(p.t_iso), y: +p.humidifier }}))
+                              .filter(p => !Number.isNaN(p.x));
 
         tempChart.data.datasets[0].data = tSeries;
         humChart.data.datasets[0].data  = hSeries;
@@ -284,7 +315,7 @@ def api_data():
     data = load_data(days=days, sample=sample)
     return jsonify({"data": data})
 
-# ---- Debug utilities ----
+# ---- Debug endpoints ----
 @app.route("/api/files")
 def api_files():
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -294,15 +325,17 @@ def api_files():
 @app.route("/debug")
 def debug_page():
     return Response(f"""<pre>
+Title: {APP_TITLE}
 Log directory: {LOG_DIR}
 Files found (last 31d):
 {chr(10).join(str(p) for p in iter_log_files(31))}
-Try the data API:
-  /api/data?days=2&sample=30
+
+Try:
   /api/files
+  /api/data?days=2&sample=30
 </pre>""", mimetype="text/plain")
 
-# ====== Entrypoint ======
+# ========= Entrypoint =========
 if __name__ == "__main__":
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Serving {APP_TITLE} on http://{HOST}:{PORT}")
