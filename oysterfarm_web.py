@@ -169,8 +169,10 @@ def index():
   </div>
   <footer>Logs path: {LOG_DIR}</footer>
 
+  <script src="https://cdn.jsdelivr.net/npm/date-fns@2.30.0/dist/date-fns.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.umd.min.js"></script>
+
   <script>
     const commonOpts = {{
       parsing: false, normalized: true, animation: false, responsive: true,
