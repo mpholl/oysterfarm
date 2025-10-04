@@ -1,71 +1,95 @@
 #!/usr/bin/env python3
 import json
-from datetime import datetime, timedelta
 from pathlib import Path
+from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, Response
 
-# --- Config ---
-LOG_DIR = Path("./logs")   # folder with dht22-YYYY-MM-DD.jsonl
-HOST = "0.0.0.0"
-PORT = 8000
-APP_TITLE = "Oyster Mushroom Farm Status"
+# ====== Config ======
+BASE_DIR = Path(__file__).resolve().parent
+LOG_DIR  = BASE_DIR / "logs"                 # absolute path, reliable under systemd
+HOST, PORT = "0.0.0.0", 8000
+APP_TITLE  = "Oyster Mushroom Farm Status"   # your title
 
 app = Flask(__name__)
 
-# ---------- Helpers ----------
+# ====== Helpers ======
 def iter_log_files(days: int):
+    """Yield existing log-YYYY-MM-DD.jsonl files (oldest→newest) for last N days."""
     today = datetime.now().date()
+    files = []
     for i in range(days):
         day = today - timedelta(days=i)
         f = LOG_DIR / f"log-{day.isoformat()}.jsonl"
         if f.exists():
-            yield f
+            files.append(f)
+    files.sort()
+    return files
+
+def _coerce_float(x):
+    if x is None:
+        return None
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+def _coerce_int01(x):
+    if x in (0, 1):
+        return int(x)
+    if isinstance(x, bool):
+        return 1 if x else 0
+    try:
+        v = int(x)
+        return 1 if v != 0 else 0
+    except (TypeError, ValueError):
+        return None
 
 def load_data(days: int, sample: int):
     """
-    Load NDJSON lines and normalize to:
-      { t, temperature, humidity, fan, humidifier }
+    Return list of {t, temperature, humidity, fan, humidifier}.
+    - t is ISO string
+    - values are floats (temp/hum) or 0/1 (fan/humidifier)
+    - keeps every Nth row (sample)
     """
     rows = []
-    files = sorted(iter_log_files(days))  # oldest -> newest
     keep_every = max(1, int(sample))
-    i = 0
+    idx = 0
 
-    for path in files:
+    for path in iter_log_files(days):
         with path.open("r") as f:
             for line in f:
                 s = line.strip()
                 if not s:
                     continue
-                if (i % keep_every) != 0:
-                    i += 1
+                if (idx % keep_every) != 0:
+                    idx += 1
                     continue
+                idx += 1
                 try:
                     obj = json.loads(s)
                 except json.JSONDecodeError:
-                    i += 1
                     continue
 
-                # timestamp -> ISO (string) for Chart.js time axis
+                # timestamp normalization
                 ts = obj.get("timestamp")
                 t_iso = None
                 if ts:
+                    # Try "YYYY-mm-dd HH:MM:SS" first, else pass through
                     try:
                         t_iso = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").isoformat()
                     except ValueError:
-                        t_iso = ts
+                        t_iso = str(ts)
 
                 rows.append({
-                    "t": t_iso or ts,
-                    "temperature": obj.get("temperature_C"),
-                    "humidity": obj.get("humidity_%"),
-                    "fan": obj.get("fan_status"),
-                    "humidifier": obj.get("humidifier_status"),
+                    "t": t_iso or None,
+                    "temperature": _coerce_float(obj.get("temperature_C")),
+                    "humidity":    _coerce_float(obj.get("humidity_%")),
+                    "fan":         _coerce_int01(obj.get("fan_status")),
+                    "humidifier":  _coerce_int01(obj.get("humidifier_status")),
                 })
-                i += 1
     return rows
 
-# ---------- Routes ----------
+# ====== Routes ======
 @app.route("/")
 def index():
     return Response(f"""<!doctype html>
@@ -86,7 +110,7 @@ def index():
   select {{ padding:6px 8px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; }}
   button {{ padding:8px 12px; border:1px solid #1e293b; background:#0f172a; color:#fff; border-radius:10px; cursor:pointer; }}
   .grid {{ display:grid; grid-template-columns:1fr; gap:16px; }}
-  @media(min-width: 900px) {{ .grid {{ grid-template-columns: 1fr 1fr; }} }}
+  @media(min-width:900px) {{ .grid {{ grid-template-columns:1fr 1fr; }} }}
   .card {{ background:var(--card); border:1px solid #e2e8f0; border-radius:16px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.03); }}
   canvas {{ width:100%; height:360px; }}
   footer {{ color:var(--muted); font-size:12px; padding:16px; text-align:center; }}
@@ -143,16 +167,13 @@ def index():
       </div>
     </div>
   </div>
-  <footer>Served by Flask on your Raspberry Pi • Data from daily NDJSON logs</footer>
+  <footer>Logs path: {LOG_DIR}</footer>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.umd.min.js"></script>
   <script>
     const commonOpts = {{
-      parsing: false,
-      normalized: true,
-      animation: false,
-      responsive: true,
+      parsing: false, normalized: true, animation: false, responsive: true,
       scales: {{
         x: {{ type: 'time', time: {{ tooltipFormat: 'yyyy-MM-dd HH:mm:ss' }}, ticks: {{ maxRotation: 0, autoSkip: true }} }},
         y: {{ beginAtZero: false }}
@@ -175,7 +196,6 @@ def index():
       options: commonOpts
     }});
 
-    // Devices chart: stepped 0/1 lines; y axis locked to 0..1
     const devChart = new Chart(document.getElementById('devChart').getContext('2d'), {{
       type: 'line',
       data: {{ datasets: [
@@ -217,14 +237,12 @@ def index():
         devChart.data.datasets[0].data  = fanSeries;
         devChart.data.datasets[1].data  = humiSeries;
 
-        tempChart.update('none');
-        humChart.update('none');
-        devChart.update('none');
+        tempChart.update('none'); humChart.update('none'); devChart.update('none');
 
         status.textContent = pts.length ? `Loaded ${{pts.length}} points` : 'No data found';
       }} catch (e) {{
         console.error(e);
-        document.getElementById('status').textContent = 'Error loading data';
+        status.textContent = 'Error loading data';
       }}
     }}
 
@@ -264,7 +282,27 @@ def api_data():
     data = load_data(days=days, sample=sample)
     return jsonify({"data": data})
 
+# ---- Debug utilities ----
+@app.route("/api/files")
+def api_files():
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    files = [str(p) for p in iter_log_files(31)]
+    return jsonify({"log_dir": str(LOG_DIR), "found_files": files})
+
+@app.route("/debug")
+def debug_page():
+    return Response(f"""<pre>
+Log directory: {LOG_DIR}
+Files found (last 31d):
+{chr(10).join(str(p) for p in iter_log_files(31))}
+Try the data API:
+  /api/data?days=2&sample=30
+  /api/files
+</pre>""", mimetype="text/plain")
+
+# ====== Entrypoint ======
 if __name__ == "__main__":
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Serving {APP_TITLE} on http://{HOST}:{PORT}   (logs in {LOG_DIR.resolve()})")
+    print(f"Serving {APP_TITLE} on http://{HOST}:{PORT}")
+    print(f"Logs directory: {LOG_DIR}")
     app.run(host=HOST, port=PORT, debug=False)
