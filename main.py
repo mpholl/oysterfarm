@@ -9,8 +9,8 @@ import os
 
 # timer settings
 sleep_time = 5          # [s] sleep for this time at the end of each loop
-fan_pause = 45*60       # [s] switch on fan, if off for more than this time
-fan_on = 2*60           # [s] run ran for this time
+fan_pause = 60*60       # [s] switch on fan, if off for more than this time
+fan_on = 1*60           # [s] run ran for this time
 
 
 # humidity thresholds
