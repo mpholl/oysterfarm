@@ -16,7 +16,7 @@ fan_on = 1*60           # [s] run ran for this time
 # humidity thresholds
 hum_low = 80            # if humidity lower, run humidifier
 hum_high = 90           # if humidity higher, stop humidifier
-hum_purge = 95          # if humidity higher, purge tent with fan
+hum_purge = 98          # if humidity higher, purge tent with fan
 purging = False
 
 
