@@ -11,6 +11,8 @@ DEFAULTS = {
     "hum_purge": 95,      # if humidity higher, purge tent with fan
     "fan_on": 2 * 60,     # [s] run fan for this time
     "fan_pause": 45 * 60, # [s] switch on fan, if off for more than this time
+    "humidifier_on": 5 * 60,      # [s] humidifier burst duration, while humidity < hum_low
+    "humidifier_pause": 25 * 60,  # [s] pause between humidifier bursts, to let humidity diffuse before re-checking
 }
 
 

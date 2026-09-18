@@ -11,9 +11,10 @@ from config import load_config
 # timer settings
 sleep_time = 5          # [s] sleep for this time at the end of each loop
 
-# humidity thresholds and fan timers are adjustable from the web interface
-# and are re-read from config.json every loop iteration (see load_config())
+# humidity thresholds and fan/humidifier timers are adjustable from the web
+# interface and are re-read from config.json every loop iteration (see load_config())
 purging = False
+humidifying = False
 
 
 # logging folders and filenames
@@ -58,6 +59,7 @@ pi.write(fanpin, off)
 current_day, log_file = open_log_for_today()
 print(f"Logging to {log_file.name} (Ctrl+C to stop)")
 fan_timestamp = time.time()
+humidifier_timestamp = time.time()
 
 # the main loop
 try: 
@@ -84,19 +86,23 @@ try:
         hum_purge = cfg["hum_purge"]
         fan_on = cfg["fan_on"]
         fan_pause = cfg["fan_pause"]
+        humidifier_on = cfg["humidifier_on"]
+        humidifier_pause = cfg["humidifier_pause"]
 
-        # if humidity is below threshold, turn off fan, run humidifier,
+        # if humidity is below threshold, start humidifying (in bursts, see below)
         if humidity<hum_low:
-            pi.write(humidifierpin, on)
-        # if humidity is high, stop humidifier
-        elif humidity>hum_high: 
+            humidifying = True
+        # if humidity is high, stop humidifying
+        elif humidity>hum_high:
+            humidifying = False
             pi.write(humidifierpin, off)
         # if humidity higher than hum_purge, turn off humidifier and run fan
         if humidity>hum_purge:
+            humidifying = False
             pi.write(humidifierpin, off)
             pi.write(fanpin, on)
             purging = True
-        
+
         # check if currently purging
         if purging:
             if humidity<hum_high:   # if purging and humidity in range, stop
@@ -112,6 +118,18 @@ try:
             if (pi.read(fanpin) == off) and (time.time() - fan_timestamp > fan_pause):
                 pi.write(fanpin, on)
                 fan_timestamp = time.time()
+
+            # pulse the humidifier in short bursts rather than running it continuously,
+            # so humidity has time to diffuse to the sensor before overshooting hum_purge
+            if humidifying:
+                if (pi.read(humidifierpin) == on) and (time.time() - humidifier_timestamp > humidifier_on):
+                    pi.write(humidifierpin, off)
+                    humidifier_timestamp = time.time()
+                if (pi.read(humidifierpin) == off) and (time.time() - humidifier_timestamp > humidifier_pause):
+                    pi.write(humidifierpin, on)
+                    humidifier_timestamp = time.time()
+            else:
+                pi.write(humidifierpin, off)
 
         # finally log everything
         entry = {
