@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, Response
+from config import load_config, save_config
 
 # ========= Configuration =========
 BASE_DIR = Path(__file__).resolve().parent
@@ -154,6 +155,29 @@ def index():
       <span id="status" style="margin-left:auto;">Ready</span>
     </div>
 
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin:0 0 8px 0;">Settings</h3>
+      <form id="settingsForm" class="controls" style="margin-bottom:0;">
+        <label>Humidity low (%):
+          <input type="number" id="hum_low" min="0" max="100" step="1" style="width:70px;">
+        </label>
+        <label>Humidity high (%):
+          <input type="number" id="hum_high" min="0" max="100" step="1" style="width:70px;">
+        </label>
+        <label>Humidity purge (%):
+          <input type="number" id="hum_purge" min="0" max="100" step="1" style="width:70px;">
+        </label>
+        <label>Fan run duration (min):
+          <input type="number" id="fan_on" min="0" step="0.5" style="width:70px;">
+        </label>
+        <label>Fan run interval (min):
+          <input type="number" id="fan_pause" min="0" step="0.5" style="width:70px;">
+        </label>
+        <button type="submit">Save</button>
+        <span id="settingsStatus" style="margin-left:auto;"></span>
+      </form>
+    </div>
+
     <div class="grid">
       <div class="card">
         <h3 style="margin:0 0 8px 0;">Temperature (°C)</h3>
@@ -240,6 +264,53 @@ def index():
       }}
     }});
 
+    async function loadSettings() {{
+      const status = document.getElementById('settingsStatus');
+      try {{
+        const res = await fetch('/api/config', {{ cache: 'no-store' }});
+        const cfg = await res.json();
+        document.getElementById('hum_low').value = cfg.hum_low;
+        document.getElementById('hum_high').value = cfg.hum_high;
+        document.getElementById('hum_purge').value = cfg.hum_purge;
+        document.getElementById('fan_on').value = cfg.fan_on / 60;
+        document.getElementById('fan_pause').value = cfg.fan_pause / 60;
+      }} catch (e) {{
+        console.error(e);
+        status.textContent = 'Failed to load settings';
+      }}
+    }}
+
+    document.getElementById('settingsForm').addEventListener('submit', async (e) => {{
+      e.preventDefault();
+      const status = document.getElementById('settingsStatus');
+      status.textContent = 'Saving…';
+      const payload = {{
+        hum_low: parseFloat(document.getElementById('hum_low').value),
+        hum_high: parseFloat(document.getElementById('hum_high').value),
+        hum_purge: parseFloat(document.getElementById('hum_purge').value),
+        fan_on: parseFloat(document.getElementById('fan_on').value) * 60,
+        fan_pause: parseFloat(document.getElementById('fan_pause').value) * 60,
+      }};
+      try {{
+        const res = await fetch('/api/config', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify(payload),
+        }});
+        const data = await res.json();
+        if (!res.ok) {{
+          status.textContent = data.error || 'Failed to save settings';
+          return;
+        }}
+        status.textContent = 'Saved';
+      }} catch (e) {{
+        console.error(e);
+        status.textContent = 'Failed to save settings';
+      }}
+    }});
+
+    loadSettings();
+
     let timer = null;
 
     async function loadData() {{
@@ -296,6 +367,35 @@ def index():
 </body>
 </html>
 """, mimetype="text/html")
+
+@app.route("/api/config", methods=["GET", "POST"])
+def api_config():
+    if request.method == "GET":
+        return jsonify(load_config())
+
+    body = request.get_json(silent=True) or {}
+    try:
+        hum_low = float(body["hum_low"])
+        hum_high = float(body["hum_high"])
+        hum_purge = float(body["hum_purge"])
+        fan_on = float(body["fan_on"])
+        fan_pause = float(body["fan_pause"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "Invalid or missing settings"}), 400
+
+    if not (0 <= hum_low < hum_high < hum_purge <= 100):
+        return jsonify({"error": "Require 0 <= humidity low < high < purge <= 100"}), 400
+    if fan_on <= 0 or fan_pause <= 0:
+        return jsonify({"error": "Fan timers must be positive"}), 400
+
+    cfg = save_config({
+        "hum_low": hum_low,
+        "hum_high": hum_high,
+        "hum_purge": hum_purge,
+        "fan_on": fan_on,
+        "fan_pause": fan_pause,
+    })
+    return jsonify(cfg)
 
 @app.route("/api/data")
 def api_data():

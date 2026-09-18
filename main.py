@@ -5,18 +5,14 @@ import DHT22
 import json
 import signal
 import os
+from config import load_config
 
 
 # timer settings
 sleep_time = 5          # [s] sleep for this time at the end of each loop
-fan_pause = 45*60       # [s] switch on fan, if off for more than this time
-fan_on = 2*60           # [s] run ran for this time
 
-
-# humidity thresholds
-hum_low = 80            # if humidity lower, run humidifier
-hum_high = 90           # if humidity higher, stop humidifier
-hum_purge = 95          # if humidity higher, purge tent with fan
+# humidity thresholds and fan timers are adjustable from the web interface
+# and are re-read from config.json every loop iteration (see load_config())
 purging = False
 
 
@@ -81,7 +77,15 @@ try:
         temperature = sensor.temperature()
         humidity = sensor.humidity()
 
-        # if humidity is below threshold, turn off fan, run humidifier, 
+        # re-read adjustable settings, in case they were changed via the web interface
+        cfg = load_config()
+        hum_low = cfg["hum_low"]
+        hum_high = cfg["hum_high"]
+        hum_purge = cfg["hum_purge"]
+        fan_on = cfg["fan_on"]
+        fan_pause = cfg["fan_pause"]
+
+        # if humidity is below threshold, turn off fan, run humidifier,
         if humidity<hum_low:
             pi.write(humidifierpin, on)
         # if humidity is high, stop humidifier

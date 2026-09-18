@@ -1,0 +1,35 @@
+import json
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+
+# settings adjustable from the web interface
+DEFAULTS = {
+    "hum_low": 80,        # if humidity lower, run humidifier
+    "hum_high": 90,       # if humidity higher, stop humidifier
+    "hum_purge": 95,      # if humidity higher, purge tent with fan
+    "fan_on": 2 * 60,     # [s] run fan for this time
+    "fan_pause": 45 * 60, # [s] switch on fan, if off for more than this time
+}
+
+
+def load_config():
+    cfg = dict(DEFAULTS)
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            data = json.load(f)
+        for key in DEFAULTS:
+            if key in data:
+                cfg[key] = data[key]
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return cfg
+
+
+def save_config(updates):
+    cfg = load_config()
+    cfg.update({k: v for k, v in updates.items() if k in DEFAULTS})
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(cfg, f, indent=2)
+    return cfg

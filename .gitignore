@@ -1,6 +1,9 @@
 # log folder
 logs/**
 
+# runtime settings, adjustable from the web interface
+config.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
