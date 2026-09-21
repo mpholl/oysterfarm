@@ -149,7 +149,7 @@ try:
             pi.write(fanpin, on)
         elif purging:
             pi.write(fanpin, on)
-            if humidity<hum_low:   # if purging and humidity in range, stop
+            if humidity<(hum_low+hum_high)/2:   # if purging and humidity back to mid-range, stop
                 pi.write(fanpin, off)
                 purging = False
                 fan_timestamp = now_ts
