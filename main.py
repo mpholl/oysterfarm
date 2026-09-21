@@ -5,7 +5,7 @@ import DHT22
 import json
 import signal
 import os
-from config import load_config, get_fan_force_until, set_fan_force_until
+from config import load_config, get_fan_force_until, set_fan_force_until, get_device_override
 
 
 # timer settings
@@ -103,7 +103,16 @@ try:
             humidifying = False
             purging = True
 
-        if not humidifying:
+        # a manual on/off override from the web interface takes priority over
+        # the automatic humidity-based control above
+        humidifier_override = get_device_override("humidifier")
+        if humidifier_override == "on":
+            pi.write(humidifierpin, on)
+            humidifier_timestamp = now_ts
+        elif humidifier_override == "off":
+            pi.write(humidifierpin, off)
+            humidifier_timestamp = now_ts
+        elif not humidifying:
             pi.write(humidifierpin, off)
         else:
             # pulse the humidifier in short bursts rather than running it continuously,
@@ -127,7 +136,16 @@ try:
             pi.write(fanpin, off)
             fan_timestamp = now_ts
 
-        if fan_forced:
+        # a manual on/off override takes priority over both the timed force
+        # above and the automatic purge/pulse schedule below
+        fan_override = get_device_override("fan")
+        if fan_override == "on":
+            pi.write(fanpin, on)
+            fan_timestamp = now_ts
+        elif fan_override == "off":
+            pi.write(fanpin, off)
+            fan_timestamp = now_ts
+        elif fan_forced:
             pi.write(fanpin, on)
         elif purging:
             pi.write(fanpin, on)

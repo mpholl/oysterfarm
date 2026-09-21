@@ -38,17 +38,41 @@ def save_config(updates):
     return cfg
 
 
-# transient runtime state (not a user-adjustable setting), e.g. a manual fan
-# override requested from the web interface: "run the fan until this time"
-def get_fan_force_until():
+# transient runtime state (not a user-adjustable setting): a manual fan
+# "run for x minutes" request, and manual on/off overrides for each device,
+# both requested from the web interface
+DEVICE_OVERRIDE_STATES = ("auto", "on", "off")
+
+
+def _load_state():
     try:
         with open(STATE_PATH, "r") as f:
-            data = json.load(f)
-        return data.get("fan_force_until")
+            return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return None
+        return {}
+
+
+def _save_state(updates):
+    state = _load_state()
+    state.update(updates)
+    with open(STATE_PATH, "w") as f:
+        json.dump(state, f, indent=2)
+    return state
+
+
+def get_fan_force_until():
+    return _load_state().get("fan_force_until")
 
 
 def set_fan_force_until(until):
-    with open(STATE_PATH, "w") as f:
-        json.dump({"fan_force_until": until}, f, indent=2)
+    _save_state({"fan_force_until": until})
+
+
+def get_device_override(device):
+    return _load_state().get(f"{device}_override", "auto")
+
+
+def set_device_override(device, state):
+    if state not in DEVICE_OVERRIDE_STATES:
+        raise ValueError(f"invalid override state: {state!r}")
+    _save_state({f"{device}_override": state})

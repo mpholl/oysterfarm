@@ -4,7 +4,11 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, Response
-from config import load_config, save_config, get_fan_force_until, set_fan_force_until
+from config import (
+    load_config, save_config,
+    get_fan_force_until, set_fan_force_until,
+    get_device_override, set_device_override, DEVICE_OVERRIDE_STATES,
+)
 
 # ========= Configuration =========
 BASE_DIR = Path(__file__).resolve().parent
@@ -113,6 +117,10 @@ def index():
   label {{ font-size:14px; }}
   select {{ padding:6px 8px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; }}
   button {{ padding:8px 12px; border:1px solid #1e293b; background:#0f172a; color:#fff; border-radius:10px; cursor:pointer; }}
+  .toggle-group {{ display:inline-flex; border:1px solid #cbd5e1; border-radius:10px; overflow:hidden; }}
+  .toggle-group button {{ border:none; border-radius:0; background:#fff; color:var(--fg); padding:6px 12px; }}
+  .toggle-group button + button {{ border-left:1px solid #cbd5e1; }}
+  .toggle-group button.active {{ background:#0f172a; color:#fff; }}
   .grid {{ display:grid; grid-template-columns:1fr; gap:16px; }}
   @media(min-width:900px) {{ .grid {{ grid-template-columns:1fr 1fr; }} }}
   .card {{ background:var(--card); border:1px solid #e2e8f0; border-radius:16px; padding:12px; box-shadow:0 1px 2px rgba(0,0,0,.03); }}
@@ -197,6 +205,25 @@ def index():
       </form>
     </div>
 
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin:0 0 8px 0;">Device overrides</h3>
+      <div class="controls" style="margin-bottom:0;">
+        <span>Fan:</span>
+        <div class="toggle-group" data-device="fan">
+          <button type="button" data-state="auto">Auto</button>
+          <button type="button" data-state="on">On</button>
+          <button type="button" data-state="off">Off</button>
+        </div>
+        <span>Humidifier:</span>
+        <div class="toggle-group" data-device="humidifier">
+          <button type="button" data-state="auto">Auto</button>
+          <button type="button" data-state="on">On</button>
+          <button type="button" data-state="off">Off</button>
+        </div>
+        <span id="overrideStatus" style="margin-left:auto;"></span>
+      </div>
+    </div>
+
     <div class="grid">
       <div class="card">
         <h3 style="margin:0 0 8px 0;">Temperature (°C)</h3>
@@ -207,8 +234,12 @@ def index():
         <canvas id="humChart"></canvas>
       </div>
       <div class="card" style="grid-column:1/-1">
-        <h3 style="margin:0 0 8px 0;">Devices (on/off)</h3>
-        <canvas id="devChart"></canvas>
+        <h3 style="margin:0 0 8px 0;">Fan</h3>
+        <canvas id="fanChart"></canvas>
+      </div>
+      <div class="card" style="grid-column:1/-1">
+        <h3 style="margin:0 0 8px 0;">Humidifier</h3>
+        <canvas id="humidifierChart"></canvas>
       </div>
     </div>
   </div>
@@ -268,19 +299,33 @@ def index():
       options: commonOpts
     }});
 
-    const devChart = new Chart(document.getElementById('devChart').getContext('2d'), {{
-      type: 'line',
-      data: {{ datasets: [
-        {{ label: 'Fan', data: [], borderWidth: 2, pointRadius: 0, stepped: true }},
-        {{ label: 'Humidifier', data: [], borderWidth: 2, pointRadius: 0, stepped: true }}
-      ]}},
-      options: {{
+    function deviceChartOptions() {{
+      return {{
         ...commonOpts,
+        plugins: {{ ...commonOpts.plugins, legend: {{ display: false }} }},
         scales: {{
           x: commonOpts.scales.x,
-          y: {{ min: 0, max: 1, ticks: {{ stepSize: 1 }} }}
+          y: {{ min: 0, max: 1, ticks: {{ stepSize: 1, callback: (v) => v === 1 ? 'On' : 'Off' }} }}
         }}
-      }}
+      }};
+    }}
+
+    const fanChart = new Chart(document.getElementById('fanChart').getContext('2d'), {{
+      type: 'line',
+      data: {{ datasets: [{{
+        label: 'Fan', data: [], borderWidth: 2, pointRadius: 0, stepped: true,
+        fill: 'origin', backgroundColor: 'rgba(59,130,246,0.25)', borderColor: 'rgba(59,130,246,1)'
+      }}] }},
+      options: deviceChartOptions()
+    }});
+
+    const humidifierChart = new Chart(document.getElementById('humidifierChart').getContext('2d'), {{
+      type: 'line',
+      data: {{ datasets: [{{
+        label: 'Humidifier', data: [], borderWidth: 2, pointRadius: 0, stepped: true,
+        fill: 'origin', backgroundColor: 'rgba(16,185,129,0.25)', borderColor: 'rgba(16,185,129,1)'
+      }}] }},
+      options: deviceChartOptions()
     }});
 
     async function loadSettings() {{
@@ -397,6 +442,51 @@ def index():
     loadFanForce();
     setInterval(loadFanForce, 5000);
 
+    function renderOverrideButtons(device, state) {{
+      document.querySelectorAll(`.toggle-group[data-device="${{device}}"] button`).forEach(btn => {{
+        btn.classList.toggle('active', btn.dataset.state === state);
+      }});
+    }}
+
+    async function loadOverride(device) {{
+      try {{
+        const res = await fetch(`/api/override/${{device}}`, {{ cache: 'no-store' }});
+        const data = await res.json();
+        renderOverrideButtons(device, data.state);
+      }} catch (e) {{
+        console.error(e);
+      }}
+    }}
+
+    document.querySelectorAll('.toggle-group button').forEach(btn => {{
+      btn.addEventListener('click', async () => {{
+        const device = btn.closest('.toggle-group').dataset.device;
+        const state = btn.dataset.state;
+        const status = document.getElementById('overrideStatus');
+        status.textContent = 'Updating…';
+        try {{
+          const res = await fetch(`/api/override/${{device}}`, {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{ state }}),
+          }});
+          const data = await res.json();
+          if (!res.ok) {{
+            status.textContent = data.error || 'Failed to update';
+            return;
+          }}
+          renderOverrideButtons(device, data.state);
+          status.textContent = '';
+        }} catch (e) {{
+          console.error(e);
+          status.textContent = 'Failed to update';
+        }}
+      }});
+    }});
+
+    loadOverride('fan');
+    loadOverride('humidifier');
+
     let timer = null;
 
     async function loadData() {{
@@ -415,19 +505,22 @@ def index():
         const hSeries = pts.filter(p => p.t_iso && p.humidity != null)
                            .map(p => ({{ x: tsToMs(p.t_iso), y: +p.humidity }}))
                            .filter(p => !Number.isNaN(p.x));
+        // pins are active-low (main.py: on=0, off=1), so invert here for display —
+        // the chart's "On"/1 should mean the device is actually running
         const fanSeries = pts.filter(p => p.t_iso && p.fan != null)
-                             .map(p => ({{ x: tsToMs(p.t_iso), y: +p.fan }}))
+                             .map(p => ({{ x: tsToMs(p.t_iso), y: 1 - (+p.fan) }}))
                              .filter(p => !Number.isNaN(p.x));
         const humiSeries = pts.filter(p => p.t_iso && p.humidifier != null)
-                              .map(p => ({{ x: tsToMs(p.t_iso), y: +p.humidifier }}))
+                              .map(p => ({{ x: tsToMs(p.t_iso), y: 1 - (+p.humidifier) }}))
                               .filter(p => !Number.isNaN(p.x));
 
         tempChart.data.datasets[0].data = tSeries;
         humChart.data.datasets[0].data  = hSeries;
-        devChart.data.datasets[0].data  = fanSeries;
-        devChart.data.datasets[1].data  = humiSeries;
+        fanChart.data.datasets[0].data  = fanSeries;
+        humidifierChart.data.datasets[0].data = humiSeries;
 
-        tempChart.update('none'); humChart.update('none'); devChart.update('none');
+        tempChart.update('none'); humChart.update('none');
+        fanChart.update('none'); humidifierChart.update('none');
 
         status.textContent = pts.length ? `Loaded ${{pts.length}} points` : 'No data found';
       }} catch (e) {{
@@ -518,6 +611,22 @@ def api_fan_force():
 
     set_fan_force_until(time.time() + minutes * 60)
     return jsonify(_fan_force_status())
+
+@app.route("/api/override/<device>", methods=["GET", "POST"])
+def api_override(device):
+    if device not in ("fan", "humidifier"):
+        return jsonify({"error": "Unknown device"}), 404
+
+    if request.method == "GET":
+        return jsonify({"state": get_device_override(device)})
+
+    body = request.get_json(silent=True) or {}
+    state = body.get("state")
+    if state not in DEVICE_OVERRIDE_STATES:
+        return jsonify({"error": f"state must be one of {DEVICE_OVERRIDE_STATES}"}), 400
+
+    set_device_override(device, state)
+    return jsonify({"state": state})
 
 @app.route("/api/data")
 def api_data():
