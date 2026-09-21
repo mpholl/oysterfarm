@@ -4,6 +4,9 @@ logs/**
 # runtime settings, adjustable from the web interface
 config.json
 
+# transient runtime state (e.g. manual fan override)
+state.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

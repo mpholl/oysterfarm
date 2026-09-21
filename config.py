@@ -3,6 +3,7 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
+STATE_PATH = os.path.join(BASE_DIR, "state.json")
 
 # settings adjustable from the web interface
 DEFAULTS = {
@@ -35,3 +36,19 @@ def save_config(updates):
     with open(CONFIG_PATH, "w") as f:
         json.dump(cfg, f, indent=2)
     return cfg
+
+
+# transient runtime state (not a user-adjustable setting), e.g. a manual fan
+# override requested from the web interface: "run the fan until this time"
+def get_fan_force_until():
+    try:
+        with open(STATE_PATH, "r") as f:
+            data = json.load(f)
+        return data.get("fan_force_until")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def set_fan_force_until(until):
+    with open(STATE_PATH, "w") as f:
+        json.dump({"fan_force_until": until}, f, indent=2)

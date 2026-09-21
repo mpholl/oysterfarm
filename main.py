@@ -5,7 +5,7 @@ import DHT22
 import json
 import signal
 import os
-from config import load_config
+from config import load_config, get_fan_force_until, set_fan_force_until
 
 
 # timer settings
@@ -89,47 +89,58 @@ try:
         humidifier_on = cfg["humidifier_on"]
         humidifier_pause = cfg["humidifier_pause"]
 
+        now_ts = time.time()
+
+        # --- humidifier control ---
         # if humidity is below threshold, start humidifying (in bursts, see below)
         if humidity<hum_low:
             humidifying = True
         # if humidity is high, stop humidifying
         elif humidity>hum_high:
             humidifying = False
-            pi.write(humidifierpin, off)
-        # if humidity higher than hum_purge, turn off humidifier and run fan
+        # if humidity higher than hum_purge, stop humidifying and purge tent with fan
         if humidity>hum_purge:
             humidifying = False
-            pi.write(humidifierpin, off)
-            pi.write(fanpin, on)
             purging = True
 
-        # check if currently purging
-        if purging:
+        if not humidifying:
+            pi.write(humidifierpin, off)
+        else:
+            # pulse the humidifier in short bursts rather than running it continuously,
+            # so humidity has time to diffuse to the sensor before overshooting hum_purge
+            if (pi.read(humidifierpin) == on) and (now_ts - humidifier_timestamp > humidifier_on):
+                pi.write(humidifierpin, off)
+                humidifier_timestamp = now_ts
+            if (pi.read(humidifierpin) == off) and (now_ts - humidifier_timestamp > humidifier_pause):
+                pi.write(humidifierpin, on)
+                humidifier_timestamp = now_ts
+
+        # --- fan control ---
+        # a manual "force fan on for x minutes" request from the web interface
+        fan_force_until = get_fan_force_until()
+        fan_forced = fan_force_until is not None and now_ts < fan_force_until
+        if fan_force_until is not None and not fan_forced:
+            # forced run just expired, clear it and resume the regular schedule
+            set_fan_force_until(None)
+            fan_timestamp = now_ts
+
+        if fan_forced:
+            pi.write(fanpin, on)
+        elif purging:
+            pi.write(fanpin, on)
             if humidity<hum_high:   # if purging and humidity in range, stop
                 pi.write(fanpin, off)
                 purging = False
-                fan_timestamp = time.time()
+                fan_timestamp = now_ts
         else:        # check if fan has run in the last 45 mins, run for some time, then turn of
             # if fan is running, check if ran for longer than on time
-            if (pi.read(fanpin) == on) and (time.time() - fan_timestamp > fan_on):
+            if (pi.read(fanpin) == on) and (now_ts - fan_timestamp > fan_on):
                 pi.write(fanpin, off)
-                fan_timestamp = time.time()
+                fan_timestamp = now_ts
             #if fan isn't running, check if it's off for longer than off_time
-            if (pi.read(fanpin) == off) and (time.time() - fan_timestamp > fan_pause):
+            if (pi.read(fanpin) == off) and (now_ts - fan_timestamp > fan_pause):
                 pi.write(fanpin, on)
-                fan_timestamp = time.time()
-
-            # pulse the humidifier in short bursts rather than running it continuously,
-            # so humidity has time to diffuse to the sensor before overshooting hum_purge
-            if humidifying:
-                if (pi.read(humidifierpin) == on) and (time.time() - humidifier_timestamp > humidifier_on):
-                    pi.write(humidifierpin, off)
-                    humidifier_timestamp = time.time()
-                if (pi.read(humidifierpin) == off) and (time.time() - humidifier_timestamp > humidifier_pause):
-                    pi.write(humidifierpin, on)
-                    humidifier_timestamp = time.time()
-            else:
-                pi.write(humidifierpin, off)
+                fan_timestamp = now_ts
 
         # finally log everything
         entry = {

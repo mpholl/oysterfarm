@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import json
+import time
 from pathlib import Path
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, Response
-from config import load_config, save_config
+from config import load_config, save_config, get_fan_force_until, set_fan_force_until
 
 # ========= Configuration =========
 BASE_DIR = Path(__file__).resolve().parent
@@ -184,6 +185,18 @@ def index():
       </form>
     </div>
 
+    <div class="card" style="margin-bottom:16px;">
+      <h3 style="margin:0 0 8px 0;">Manual fan override</h3>
+      <form id="fanForceForm" class="controls" style="margin-bottom:0;">
+        <label>Run fan for (min):
+          <input type="number" id="fan_force_minutes" min="0" step="1" value="10" style="width:70px;">
+        </label>
+        <button type="submit">Force fan on</button>
+        <button type="button" id="fanForceCancel" hidden>Cancel</button>
+        <span id="fanForceStatus" style="margin-left:auto;"></span>
+      </form>
+    </div>
+
     <div class="grid">
       <div class="card">
         <h3 style="margin:0 0 8px 0;">Temperature (°C)</h3>
@@ -321,6 +334,69 @@ def index():
 
     loadSettings();
 
+    function fmtRemaining(sec) {{
+      sec = Math.round(sec);
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${{m}}:${{String(s).padStart(2,'0')}}`;
+    }}
+
+    function renderFanForce(data) {{
+      const status = document.getElementById('fanForceStatus');
+      const cancelBtn = document.getElementById('fanForceCancel');
+      if (data.forced) {{
+        status.textContent = `Fan forced on — ${{fmtRemaining(data.seconds_remaining)}} remaining`;
+        cancelBtn.hidden = false;
+      }} else {{
+        status.textContent = '';
+        cancelBtn.hidden = true;
+      }}
+    }}
+
+    async function loadFanForce() {{
+      try {{
+        const res = await fetch('/api/fan/force', {{ cache: 'no-store' }});
+        renderFanForce(await res.json());
+      }} catch (e) {{
+        console.error(e);
+      }}
+    }}
+
+    document.getElementById('fanForceForm').addEventListener('submit', async (e) => {{
+      e.preventDefault();
+      const status = document.getElementById('fanForceStatus');
+      status.textContent = 'Starting…';
+      const minutes = parseFloat(document.getElementById('fan_force_minutes').value);
+      try {{
+        const res = await fetch('/api/fan/force', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ minutes }}),
+        }});
+        const data = await res.json();
+        if (!res.ok) {{
+          status.textContent = data.error || 'Failed to start fan';
+          return;
+        }}
+        renderFanForce(data);
+      }} catch (e) {{
+        console.error(e);
+        status.textContent = 'Failed to start fan';
+      }}
+    }});
+
+    document.getElementById('fanForceCancel').addEventListener('click', async () => {{
+      try {{
+        const res = await fetch('/api/fan/force', {{ method: 'DELETE' }});
+        renderFanForce(await res.json());
+      }} catch (e) {{
+        console.error(e);
+      }}
+    }});
+
+    loadFanForce();
+    setInterval(loadFanForce, 5000);
+
     let timer = null;
 
     async function loadData() {{
@@ -412,6 +488,36 @@ def api_config():
         "humidifier_pause": humidifier_pause,
     })
     return jsonify(cfg)
+
+def _fan_force_status():
+    until = get_fan_force_until()
+    remaining = (until - time.time()) if until is not None else 0
+    forced = remaining > 0
+    return {
+        "forced": forced,
+        "until": until if forced else None,
+        "seconds_remaining": max(0, remaining) if forced else 0,
+    }
+
+@app.route("/api/fan/force", methods=["GET", "POST", "DELETE"])
+def api_fan_force():
+    if request.method == "GET":
+        return jsonify(_fan_force_status())
+
+    if request.method == "DELETE":
+        set_fan_force_until(None)
+        return jsonify(_fan_force_status())
+
+    body = request.get_json(silent=True) or {}
+    try:
+        minutes = float(body["minutes"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "Invalid or missing 'minutes'"}), 400
+    if not (0 < minutes <= 24 * 60):
+        return jsonify({"error": "Minutes must be between 0 and 1440"}), 400
+
+    set_fan_force_until(time.time() + minutes * 60)
+    return jsonify(_fan_force_status())
 
 @app.route("/api/data")
 def api_data():
