@@ -120,8 +120,11 @@ try:
         fan_force_until = get_fan_force_until()
         fan_forced = fan_force_until is not None and now_ts < fan_force_until
         if fan_force_until is not None and not fan_forced:
-            # forced run just expired, clear it and resume the regular schedule
+            # forced run just expired: turn the fan off and restart the regular
+            # pause timer from now, instead of leaving it running for another
+            # full fan_on burst
             set_fan_force_until(None)
+            pi.write(fanpin, off)
             fan_timestamp = now_ts
 
         if fan_forced:
