@@ -60,6 +60,7 @@ current_day, log_file = open_log_for_today()
 print(f"Logging to {log_file.name} (Ctrl+C to stop)")
 fan_timestamp = time.time()
 humidifier_timestamp = time.time()
+purge_timestamp = time.time()
 
 # the main loop
 try: 
@@ -88,6 +89,7 @@ try:
         fan_pause = cfg["fan_pause"]
         humidifier_on = cfg["humidifier_on"]
         humidifier_pause = cfg["humidifier_pause"]
+        purge_max = cfg["purge_max"]
 
         now_ts = time.time()
 
@@ -101,6 +103,8 @@ try:
         # if humidity higher than hum_purge, stop humidifying and purge tent with fan
         if humidity>hum_purge:
             humidifying = False
+            if not purging:   # just starting a new purge, start the max-runtime timer
+                purge_timestamp = now_ts
             purging = True
 
         # a manual on/off override from the web interface takes priority over
@@ -149,7 +153,9 @@ try:
             pi.write(fanpin, on)
         elif purging:
             pi.write(fanpin, on)
-            if humidity<(hum_low+hum_high)/2:   # if purging and humidity back to mid-range, stop
+            back_in_range = humidity<(hum_low+hum_high)/2   # humidity back to mid-range, stop
+            timed_out = (now_ts - purge_timestamp>=purge_max) and humidity<hum_purge   # ran too long, but at least below the purge threshold
+            if back_in_range or timed_out:
                 pi.write(fanpin, off)
                 purging = False
                 fan_timestamp = now_ts

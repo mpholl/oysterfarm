@@ -14,6 +14,7 @@ DEFAULTS = {
     "fan_pause": 45 * 60, # [s] switch on fan, if off for more than this time
     "humidifier_on": 5 * 60,      # [s] humidifier burst duration, while humidity < hum_low
     "humidifier_pause": 25 * 60,  # [s] pause between humidifier bursts, to let humidity diffuse before re-checking
+    "purge_max": 15 * 60,  # [s] max time to run the fan while purging, once humidity is back below hum_purge
 }
 
 

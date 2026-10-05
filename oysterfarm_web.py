@@ -188,6 +188,9 @@ def index():
         <label>Humidifier pause (min):
           <input type="number" id="humidifier_pause" min="0" step="0.5" style="width:70px;">
         </label>
+        <label>Max purge run (min):
+          <input type="number" id="purge_max" min="0" step="1" style="width:70px;">
+        </label>
         <button type="submit">Save</button>
         <span id="settingsStatus" style="margin-left:auto;"></span>
       </form>
@@ -340,6 +343,7 @@ def index():
         document.getElementById('fan_pause').value = cfg.fan_pause / 60;
         document.getElementById('humidifier_on').value = cfg.humidifier_on / 60;
         document.getElementById('humidifier_pause').value = cfg.humidifier_pause / 60;
+        document.getElementById('purge_max').value = cfg.purge_max / 60;
       }} catch (e) {{
         console.error(e);
         status.textContent = 'Failed to load settings';
@@ -358,6 +362,7 @@ def index():
         fan_pause: parseFloat(document.getElementById('fan_pause').value) * 60,
         humidifier_on: parseFloat(document.getElementById('humidifier_on').value) * 60,
         humidifier_pause: parseFloat(document.getElementById('humidifier_pause').value) * 60,
+        purge_max: parseFloat(document.getElementById('purge_max').value) * 60,
       }};
       try {{
         const res = await fetch('/api/config', {{
@@ -561,6 +566,7 @@ def api_config():
         fan_pause = float(body["fan_pause"])
         humidifier_on = float(body["humidifier_on"])
         humidifier_pause = float(body["humidifier_pause"])
+        purge_max = float(body["purge_max"])
     except (KeyError, TypeError, ValueError):
         return jsonify({"error": "Invalid or missing settings"}), 400
 
@@ -570,6 +576,8 @@ def api_config():
         return jsonify({"error": "Fan timers must be positive"}), 400
     if humidifier_on <= 0 or humidifier_pause <= 0:
         return jsonify({"error": "Humidifier burst/pause times must be positive"}), 400
+    if purge_max <= 0:
+        return jsonify({"error": "Max purge run time must be positive"}), 400
 
     cfg = save_config({
         "hum_low": hum_low,
@@ -579,6 +587,7 @@ def api_config():
         "fan_pause": fan_pause,
         "humidifier_on": humidifier_on,
         "humidifier_pause": humidifier_pause,
+        "purge_max": purge_max,
     })
     return jsonify(cfg)
 
