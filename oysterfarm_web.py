@@ -143,9 +143,9 @@ def index():
       </label>
       <label>Sampling:
         <select id="sample">
-          <option value="1" selected>1 (all)</option>
+          <option value="1">1 (all)</option>
           <option value="2">2</option>
-          <option value="5">5</option>
+          <option value="5" selected>5</option>
           <option value="10">10</option>
           <option value="30">30</option>
           <option value="60">60</option>
@@ -154,10 +154,10 @@ def index():
       <label>Auto-refresh:
         <select id="refresh">
           <option value="0">Off</option>
-          <option value="5" selected>5s</option>
+          <option value="5">5s</option>
           <option value="10">10s</option>
           <option value="30">30s</option>
-          <option value="60">60s</option>
+          <option value="60" selected>60s</option>
         </select>
       </label>
       <button id="reload">Reload</button>
