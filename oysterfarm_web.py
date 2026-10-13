@@ -248,7 +248,7 @@ def index():
   </div>
   <footer>Logs path: {LOG_DIR}</footer>
 
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="/static/chart.umd.min.js"></script>
   <script>
     function tsToMs(tiso) {{
       // Convert ISO string to epoch ms; returns NaN if invalid.
@@ -680,4 +680,4 @@ if __name__ == "__main__":
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Serving {APP_TITLE} on http://{HOST}:{PORT}")
     print(f"Logs directory: {LOG_DIR}")
-    app.run(host=HOST, port=PORT, debug=False)
+    app.run(host=HOST, port=PORT, debug=False, threaded=True)
